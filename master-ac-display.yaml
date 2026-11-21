@@ -1,25 +1,48 @@
 # ESPHome configuration for Climate Control Display
-# Version: v1.0.0
-# Date: 2025-03-01
-# ESPHome Version 2025.2.1
-# WT32-SC01 PLUS 
-# ZX3D50CE08S-v15-USRC 230228
-# 3.5 inch 320x480, driver ST7796UI, interface MCU8080 8Bit, color RGB565, ILI9488 controller 
-# single touch capacitive FT6336U I2S
-# ESP32-S3 model ESP32-WROVER-B, WiFi + BT + BLE MCU module, 4MB SPI flash and 8MB PSRAM
+# https://github.com/GargIT/climate-control-display
+# Tested with ESPHome 2026.11
+#
+# Hardware: Wireless-Tag WT32-SC01 PLUS (ZX3D50CE08S-v15-USRC)
+#   ESP32-S3, 16MB flash, 2MB PSRAM (quad), WiFi + BLE
+#   3.5" 480x320 ST7796 display, 8-bit i80 bus (built-in mipi_spi driver)
+#   FT6336U capacitive touch (I2C)
+#
+# Everything you normally change is in the CONFIG block of `substitutions`.
+# UI texts live in lang/<language>.yaml.
+#
 # https://www.marutsu.co.jp/contents/shop/marutsu/datasheet/khe_WT32-SC01-PLUS.pdf
-# https://esphome.io/components/touchscreen/ft63x6.html
-# https://www.esp32.com/viewtopic.php?t=39219
-# https://github.com/esphome/esphome/pull/8230 Implement i80 bus for ili9xxx displays
+# https://esphome.io/components/lvgl/
 # https://esphome.io/cookbook/lvgl.html
-
 
 substitutions:
   ##################################################################
   # CONFIG - Update values ONLY here
   device_name: 'master-ac-display'
-  friendly_name: 'master-ac-display'
-  climate_entity: climate.master_ac # Home Assistant climate entity
+  friendly_name: 'Master AC Display'
+  language: en                      # UI language: en, sv (see lang/)
+  clock_24h: 'true'                 # 'true' = 23:59:59, 'false' = 11:59:59PM
+  log_level: DEBUG
+
+  # Home Assistant climate entity and what it supports
+  climate_entity: climate.master_ac
+  temp_min: '16'                    # min_temp of the climate entity
+  temp_max: '30'                    # max_temp of the climate entity
+  temp_step: '0.5'                  # target_temp_step of the climate entity
+  power_on_mode: cool               # HVAC mode used when the power button turns the AC on
+  hvac_auto_mode: heat_cool         # mode the AUTO button sends: heat_cool or auto
+  # Fan modes of the climate entity, in order (fan_modes attribute)
+  fan_mode_1: auto
+  fan_mode_2: low
+  fan_mode_3: medium
+  fan_mode_4: high
+  fan_mode_5: strong
+
+  # Optional frost protection page (see home-assistant/frost_protection.yaml).
+  # The page button only appears when these helpers exist in Home Assistant.
+  fp_switch: input_boolean.frost_protection
+  fp_start: input_number.frost_protection_start
+  fp_stop: input_number.frost_protection_stop
+
   # Secrets and Passwords - Update values in secrets.yaml
   wifi_ssid: !secret wifi_ssid
   wifi_password: !secret wifi_password
@@ -46,6 +69,8 @@ substitutions:
   mdi_plus: "\U000F0415"
   mdi_minus: "\U000F0374"
   mdi_water_percent: "\U000F058E"
+  mdi_snowflake_thermometer: "\U000F1A71"
+  mdi_arrow_left: "\U000F004D"
   # Colors common
   color_white: "0xFFFFFF"
   color_grey: "0xa5a5a5"
@@ -69,24 +94,25 @@ substitutions:
 esphome:
   name: $device_name
   friendly_name: $friendly_name
-  platformio_options:
-    build_unflags: -Werror=all
-    board_build.flash_mode: dio
-    board_build.flash_size: 16MB
   on_boot:
-    - delay: 1s
-    - script.execute: turn_on_screen_light
-    - delay: 5s
-    - lvgl.widget.hide: boot_screen
+    - priority: -100
+      then:
+        - script.execute: turn_on_screen_light
+        - wait_until:
+            condition: api.connected
+            timeout: 20s
+        - lvgl.widget.hide: boot_screen
+        - script.execute: update_connection_icon
 
 esp32:
   board: esp32-s3-devkitc-1
   variant: esp32s3
   flash_size: 16MB
+  flash_mode: dio
+  cpu_frequency: 240MHZ
   framework:
     type: esp-idf
     sdkconfig_options:
-      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
       CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
@@ -98,27 +124,35 @@ preferences:
 psram:
   mode: quad
   speed: 80MHz
+  
+packages:
+  language: !include lang/${language}.yaml
 
 logger:
-
-debug:
-  update_interval: 60s
+  level: ${log_level}
 
 wifi:
-  ssid: $wifi_ssid
-  password: $wifi_password
-    
+  ssid: ${wifi_ssid}
+  password: ${wifi_password}
   ap:
-    ssid: "$device_name Fallback"
-    password: $fallback_password
+    ssid: "${device_name} Fallback"
+    password: ${fallback_password}
+
+captive_portal:
 
 ota:
   - platform: esphome
-    password: $ota_password
+    password: ${ota_password}
 
+web_server:
+  port: 80
+
+debug:
+  update_interval: 60s
+  
 api:
   encryption:
-    key: $api_key
+    key: ${api_key}
   on_client_connected:
     - if:
         condition:
@@ -140,27 +174,13 @@ api:
               text: ${mdi_wifi_off}
           - lvgl.label.update:
               id: date_time_label
-              text: "Disconnected"
-
-captive_portal:
-
-web_server:
-  port: 80
+              text: "${txt_disconnected}"
 
 i2c:
+  frequency: 400kHz
   sda: GPIO6
   scl: GPIO5
   id: touch_i2c
-
-external_components:
-  # ESPHome PR for i80, io_bus, ili9xxx, spi
-  # - source: github://pr#8230
-  #   components: [i80, io_bus, ili9xxx, spi]
-  #   refresh: 1d
-  - source:
-      type: local
-      path: external_components
-    components: [i80, io_bus, ili9xxx, spi]
 
 globals:
   - id: active_lvgl_page
@@ -170,13 +190,17 @@ globals:
     restore_value: no
     initial_value: |-
       {
-        {0, {"off", "${mdi_fan_off}"}},         // fan-off
-        {1, {"auto", "${mdi_fan_auto}"}},       // fan-auto
-        {2, {"low", "${mdi_fan_speed_1}"}},     // fan-speed-1
-        {3, {"medium", "${mdi_fan_speed_2}"}},  // fan-speed-2
-        {4, {"high", "${mdi_fan_speed_3}"}},    // fan-speed-3
-        {5, {"diffuse", "${mdi_fan}"}}          // fan-diffuse
+        {0, {"${fan_mode_1}", "${mdi_fan_auto}"}},
+        {1, {"${fan_mode_2}", "${mdi_fan_speed_1}"}},
+        {2, {"${fan_mode_3}", "${mdi_fan_speed_2}"}},
+        {3, {"${fan_mode_4}", "${mdi_fan_speed_3}"}},
+        {4, {"${fan_mode_5}", "${mdi_fan}"}}
       }
+
+interval:
+  - interval: 5s
+    then:
+      - script.execute: update_connection_icon
 
 time:
   - platform: homeassistant
@@ -185,6 +209,23 @@ time:
       - seconds: /1  # Update every second
         then:
           - script.execute: update_date_time_label
+
+binary_sensor:
+  # FP on/off from HA
+  - platform: homeassistant
+    entity_id: ${fp_switch}
+    id: fp_enabled
+    internal: true
+    trigger_on_initial_state: true   # update the FP button/icon with the state HA sends on connect
+    on_state:
+      - lvgl.widget.show: fp_page_button
+      - lvgl.label.update:
+          id: fp_toggle_label
+          text: !lambda 'return x ? std::string("${mdi_power} ${txt_fp_on}") : std::string("${mdi_power} ${txt_fp_off}");'
+          text_color: !lambda 'return x ? lv_color_hex(${color_success}) : lv_color_hex(${color_grey});'
+      - lvgl.label.update:
+          id: fp_icon_label
+          text_color: !lambda 'return x ? lv_color_hex(${color_accent}) : lv_color_hex(${color_grey});'
 
 button:
   - platform: restart
@@ -199,6 +240,15 @@ button:
     entity_category: "config"
 
 text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+      icon: mdi:ip-network
+    mac_address:
+      name: "Wifi MAC"
+      entity_category: diagnostic
+      icon: mdi:network-outline
   # HA Climate HVAC mode sensor
   - platform: homeassistant
     entity_id: ${climate_entity}
@@ -206,6 +256,16 @@ text_sensor:
     internal: true
     on_value:
       then:
+        - lvgl.label.update:
+            id: fp_ac_state_label
+            text: !lambda |-
+              if (x == "heat") return std::string("${txt_ac_prefix}${txt_ac_heat}");
+              if (x == "off") return std::string("${txt_ac_prefix}${txt_ac_off}");
+              if (x == "cool") return std::string("${txt_ac_prefix}${txt_ac_cool}");
+              if (x == "${hvac_auto_mode}") return std::string("${txt_ac_prefix}${txt_ac_auto}");
+              if (x == "dry") return std::string("${txt_ac_prefix}${txt_ac_dry}");
+              if (x == "fan_only") return std::string("${txt_ac_prefix}${txt_ac_fan}");
+              return std::string("${txt_ac_prefix}${txt_ac_offline}");
         - script.execute:
             id: set_hvac_mode
             mode: !lambda return x;
@@ -221,19 +281,6 @@ text_sensor:
           id: set_fan_mode
           mode: !lambda return x;
       - script.execute: turn_on_screen_light
-  # Wifi Info
-  - platform: wifi_info
-    ip_address:
-      name: "IP Address"
-      entity_category: "diagnostic"
-      icon: mdi:ip-network
-    ssid:
-      name: "Wifi SSID"
-      icon: mdi:wifi-check
-    mac_address:
-      name: "Wifi MAC"
-      entity_category: "diagnostic"
-      icon: mdi:ip-network
   # ESPHome Info
   - platform: version
     name: "ESPHome Version"
@@ -271,18 +318,6 @@ number:
     step: 5
     mode: slider
 
-touchscreen:
-  - platform: ft63x6
-    id: device_touchscreen
-    display: device_display
-    interrupt_pin: GPIO7
-    transform:
-      swap_xy: true
-      mirror_y: false
-      mirror_x: true
-    on_touch:
-      - script.execute: turn_on_screen_light
-
 output:
   - platform: ledc
     id: backlight_pwm
@@ -305,45 +340,71 @@ light:
       then:
         - lvgl.pause:
 
-i80:
-  - id: i80bus
-    dc_pin: 
-      number: GPIO0
-      ignore_strapping_warning: true
-    wr_pin: GPIO47
+spi:
+  - type: octal
+    id: octal_spi
+    clk_pin: 47
     data_pins:
-      - GPIO9
-      - number: GPIO46
-        ignore_strapping_warning: true
-      - number: GPIO3
-        ignore_strapping_warning: true
-      - GPIO8
-      - GPIO18
-      - GPIO17
-      - GPIO16
-      - GPIO15
+      - 9
+      - ignore_strapping_warning: true
+        number: 46
+      - ignore_strapping_warning: true
+        number: 3
+      - 8
+      - 18
+      - 17
+      - 16
+      - 15
 
 display:
-  - platform: ili9xxx
+# Settings for WT32-SC01 Plus
+  - platform: mipi_spi
+    model: wt32-sc01-plus
     id: device_display
-    model: ST7796
-    bus_type: i80
-    reset_pin: GPIO4
-    pixel_mode: 16bit
-    data_rate: 4MHz
-    color_order: bgr
-    invert_colors: true
-    dimensions:
-      width: 480
-      height: 320
-    transform:
-      mirror_y: false
-      mirror_x: false
-      swap_xy: true
+    data_rate: 10MHz
     auto_clear_enabled: false
     update_interval: never
 
+touchscreen:
+  - platform: ft63x6
+    id: device_touchscreen
+    display: device_display
+    interrupt_pin: GPIO7
+    # No transform: LVGL rotation below also rotates touch (same as sc01-plus.yaml)
+    on_release:
+      - script.stop: idle_screen_off
+      - script.execute: turn_on_screen_light
+
 sensor:
+  - platform: uptime
+    name: "Uptime"
+    entity_category: diagnostic
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "Wifi RSSI"
+    entity_category: diagnostic
+    update_interval: 60s
+  # FP: start / stop temperatures from HA helpers
+  - platform: homeassistant
+    entity_id: ${fp_start}
+    id: fp_start_temp
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: fp_start_label
+          text:
+            format: "%.0f°C"
+            args: [ 'x' ]
+  - platform: homeassistant
+    entity_id: ${fp_stop}
+    id: fp_stop_temp
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: fp_stop_label
+          text:
+            format: "%.0f°C"
+            args: [ 'x' ]
   # HA Climate temperature sensor
   - platform: homeassistant
     entity_id: ${climate_entity}
@@ -353,15 +414,15 @@ sensor:
     on_value:
       - lvgl.indicator.update:
           id: hvac_temp_ticks
-          end_value: !lambda return x * 10;
+          end_value: !lambda return clamp(x, ${temp_min}.0f, ${temp_max}.0f) * 10;
       - lvgl.arc.update:
           id: hvac_temp_knob
-          value: !lambda return x * 10;
+          value: !lambda return clamp(x, ${temp_min}.0f, ${temp_max}.0f) * 10;
       - lvgl.label.update:
           id: hvac_temp_label
           text:
-            format: "%.1f"
-            args: [ 'round(x * 10) / 10' ]
+            format: "%.0f"
+            args: [ 'x' ]
       - script.execute: turn_on_screen_light
   # HA Climate current temperature sensor
   - platform: homeassistant
@@ -372,27 +433,21 @@ sensor:
     on_value:
       - lvgl.indicator.update:
           id: current_temp_needle
-          value: !lambda return x * 10;
+          value: !lambda return clamp(x, ${temp_min}.0f, ${temp_max}.0f) * 10;
       - lvgl.label.update:
           id: current_temp_label
           text:
             format: "%.1f°C"
             args: [ 'round(x * 10) / 10' ]
-  - platform: uptime
-    name: "Uptime"
-    id: sys_uptime
-    entity_category: "diagnostic"
-    update_interval: 60s
-  - platform: wifi_signal 
-    name: "Wifi RSSI"
-    id: wifi_signal_db
-    icon: mdi:wifi-arrow-left-right
-    update_interval: 60s
-    entity_category: "diagnostic"
+      - lvgl.label.update:
+          id: fp_room_temp_label
+          text:
+            format: "${txt_room} %.1f°C"
+            args: [ 'round(x * 10) / 10' ]
 
 font:
   - file: 'fonts/roboto-400-v1.ttf'
-    glyphs: ' 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ°.:/+-%–'
+    glyphs: ' 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ${lang_glyphs}°.:/+-%–'
     id: roboto_reg
     size: 18
     bpp: 4
@@ -401,6 +456,8 @@ font:
         glyphs: 
           - ${mdi_wifi}
           - ${mdi_wifi_off}
+          - ${mdi_snowflake_thermometer}
+          - ${mdi_arrow_left}
           - ${mdi_power}
           - ${mdi_fire}
           - ${mdi_snowflake}
@@ -412,7 +469,7 @@ font:
           - ${mdi_fan_off}
 
   - file: 'fonts/roboto-400-v1.ttf'
-    glyphs: ' 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ°.:/+-%–'
+    glyphs: ' 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ${lang_glyphs}°.:/+-%–'
     id: roboto_med
     size: 24
     bpp: 4
@@ -455,6 +512,7 @@ script:
   - id: idle_screen_off
     mode: restart
     then:
+      - lvgl.page.show: main_page
       - light.turn_on:
             id: backlight
             brightness: 50%
@@ -469,24 +527,45 @@ script:
             id: backlight
       - lvgl.pause:
           show_snow: true
-  # Update Time Label
+  # HA connection icon
+  - id: update_connection_icon
+    then:
+      - if:
+          condition: api.connected
+          then:
+            - lvgl.label.update:
+                id: ha_status_icon_label
+                text_color: ${color_white}
+                text: ${mdi_wifi}
+          else:
+            - lvgl.label.update:
+                id: ha_status_icon_label
+                text_color: ${color_warning}
+                text: ${mdi_wifi_off}
+  # Update Time Label (language and 12/24h from substitutions)
   - id: update_date_time_label
     then:
       - lvgl.label.update:
           id: date_time_label
           text: !lambda |-
-            static const char * const day_names[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
-            static char buf[15];  // Buffer for "XXX 12:59:59PM"
+            static const char * const day_names[] = {${txt_days}};
+            static char buf[24];  // "WED 12:59:59PM" / "LÖR 23:59:59" (non-ASCII = 2 bytes)
             auto now = id(hass_time).now();
-            int hour12 = now.hour % 12;
-            hour12 = hour12 ? hour12 : 12;
-            snprintf(buf, sizeof(buf), "%s %d:%02d:%02d%s", 
-                    day_names[now.day_of_week-1], 
-                    hour12,
+            if (!now.is_valid()) return std::string("${txt_connecting}");
+            int hour = now.hour;
+            const char *suffix = "";
+            if (!${clock_24h}) {
+              suffix = hour >= 12 ? "PM" : "AM";
+              hour = hour % 12;
+              if (hour == 0) hour = 12;
+            }
+            snprintf(buf, sizeof(buf), ${clock_24h} ? "%s %02d:%02d:%02d%s" : "%s %d:%02d:%02d%s",
+                    day_names[now.day_of_week-1],
+                    hour,
                     now.minute,
                     now.second,
-                    now.hour >= 12 ? "PM" : "AM");
-            return buf;
+                    suffix);
+            return std::string(buf);
   # HVAC Modes UI scripts
   - id: set_hvac_mode
     parameters:
@@ -516,8 +595,8 @@ script:
             - lvgl.label.update:
                 id: mode_label
                 text: !lambda |-
-                  if (mode == "off") return "OFF";
-                  return "OFFLINE";
+                  if (mode == "off") return "${txt_off}";
+                  return "${txt_offline}";
             - lvgl.label.update:
                 id: power_button_label
                 text_color: ${color_grey}
@@ -553,11 +632,11 @@ script:
                 text_color: ${color_white}
       - if:
           condition:
-            lambda: 'return mode == "auto";'
+            lambda: 'return mode == "${hvac_auto_mode}";'
           then:
             - lvgl.label.update:
                 id: mode_label
-                text: "AUTO"
+                text: "${txt_auto}"
             - lvgl.label.update:
                 id: auto_button_label
                 text_color: ${color_auto}
@@ -567,7 +646,7 @@ script:
           then:
             - lvgl.label.update:
                 id: mode_label
-                text: "COOL"
+                text: "${txt_cool}"
             - lvgl.label.update:
                 id: cool_button_label
                 text_color: ${color_cool}
@@ -577,7 +656,7 @@ script:
           then:
             - lvgl.label.update:
                 id: mode_label
-                text: "HEAT"
+                text: "${txt_heat}"
             - lvgl.label.update:
                 id: heat_button_label
                 text_color: ${color_heat}
@@ -587,7 +666,7 @@ script:
           then:
             - lvgl.label.update:
                 id: mode_label
-                text: "DRY"
+                text: "${txt_dry}"
             - lvgl.label.update:
                 id: dry_button_label
                 text_color: ${color_dry}
@@ -597,7 +676,7 @@ script:
           then:
             - lvgl.label.update:
                 id: mode_label
-                text: "FAN"
+                text: "${txt_fan}"
             - lvgl.label.update:
                 id: fan_only_button_label
                 text_color: ${color_fan}
@@ -606,25 +685,27 @@ script:
     parameters:
       mode: string
     then:
-      - lambda: |-
-          std::string display_mode = mode;
-          std::transform(display_mode.begin(), display_mode.end(), display_mode.begin(), ::toupper);
-          display_mode = "${mdi_fan} " + display_mode;
-          lv_label_set_text(id(fan_speed_label), display_mode.c_str());
-          for (const auto& entry : id(fan_modes)) {
-            if (entry.second.first == mode) {
-              id(fan_speed_roller).set_selected_index(entry.first, LV_ANIM_ON);
-              break;
+      - lvgl.label.update:
+          id: fan_speed_label
+          text: !lambda |-
+            std::string display_mode = mode;
+            std::transform(display_mode.begin(), display_mode.end(), display_mode.begin(), ::toupper);
+            return "${mdi_fan} " + display_mode;
+      - lvgl.roller.update:
+          id: fan_speed_roller
+          selected_index: !lambda |-
+            for (const auto& entry : id(fan_modes)) {
+              if (entry.second.first == mode) return entry.first;
             }
-          }
+            return 0;
   - id: cycle_fan_mode
     parameters:
       direction: string
     then:
       - lambda: |-
           int current_index = id(fan_speed_roller).get_selected_index();
-          const int min_index = 1;  // Start from auto (index 1)
-          const int max_index = 5;  // End at diffuse (index 5)
+          const int min_index = 0;  // auto
+          const int max_index = 4;  // strong
           if (direction == "up") {
             current_index = (current_index >= max_index) ? min_index : current_index + 1;
           } else {
@@ -637,13 +718,31 @@ script:
             entity_id: ${climate_entity}
             fan_mode: !lambda |-
               switch(id(fan_speed_roller).get_selected_index()) {
-                case 1: return "auto";
-                case 2: return "low";
-                case 3: return "medium";
-                case 4: return "high";
-                case 5: return "diffuse";
-                default: return "auto";
+                case 0: return "${fan_mode_1}";
+                case 1: return "${fan_mode_2}";
+                case 2: return "${fan_mode_3}";
+                case 3: return "${fan_mode_4}";
+                case 4: return "${fan_mode_5}";
+                default: return "${fan_mode_1}";
               }
+  # FP: adjust start/stop temperature in HA (start always below stop)
+  - id: fp_adjust
+    parameters:
+      which: string
+      delta: int
+    then:
+      - if:
+          condition:
+            lambda: |-
+              float start = id(fp_start_temp).state, stop = id(fp_stop_temp).state;
+              if (std::isnan(start) || std::isnan(stop)) return false;
+              if (which == "start") return (start + delta) < stop;
+              return (stop + delta) > start;
+          then:
+            - homeassistant.action:
+                action: !lambda 'return std::string(delta > 0 ? "input_number.increment" : "input_number.decrement");'
+                data:
+                  entity_id: !lambda 'return std::string(which == "start" ? "${fp_start}" : "${fp_stop}");'
   # Set HVAC Temperature UI scripts
   - id: set_hvac_temp
     parameters:
@@ -655,16 +754,15 @@ script:
             entity_id: ${climate_entity}
             temperature: !lambda |-
               float current_temp = id(set_temperature).state;
-              if (direction == "up") {
-                return current_temp + 0.5;
-              } else {
-                return current_temp - 0.5;
-              }
+              if (std::isnan(current_temp)) current_temp = ${temp_min};
+              float step = (direction == "up") ? ${temp_step} : -${temp_step};
+              return clamp(current_temp + step, ${temp_min}.0f, ${temp_max}.0f);
 
 lvgl:
   # LVGL GUI Design
   displays: device_display
   touchscreens: device_touchscreen
+  rotation: 90    # landscape 480x320, same as sc01-plus.yaml
   on_idle:
     - timeout: !lambda return id(screen_timeout).state * 1000;
       then:
@@ -708,7 +806,7 @@ lvgl:
       # Time
       - label:
           id: date_time_label
-          text: "Connecting..." # Time to be updated from Home Assistant time
+          text: "${txt_connecting}" # Time to be updated from Home Assistant time
           align: TOP_LEFT
           x: 10
           y: 10
@@ -725,6 +823,33 @@ lvgl:
           text_color: ${color_warning}  # Wifi icon color to be updated from Home Assistant API status
           text: ${mdi_wifi_off} # Wifi icon to be updated from Home Assistant API status
           text_font: roboto_reg
+      # Frost protection page button (left of wifi icon)
+      - button:
+          id: fp_page_button
+          hidden: true    # shown once Home Assistant reports the frost protection switch
+          align: TOP_RIGHT
+          x: -40
+          y: 2
+          width: 44
+          height: 36
+          bg_opa: TRANSP
+          shadow_opa: TRANSP
+          border_width: 0
+          widgets:
+            - label:
+                id: fp_icon_label
+                align: CENTER
+                text: ${mdi_snowflake_thermometer}
+                text_font: roboto_reg
+                text_color: ${color_grey}
+          on_press:
+            - if:
+                condition:
+                  lvgl.page.is_showing: fp_page
+                then:
+                  - lvgl.page.show: main_page
+                else:
+                  - lvgl.page.show: fp_page
       - obj:
           id: boot_screen
           x: 0
@@ -787,11 +912,11 @@ lvgl:
             bg_opa: TRANSP
             border_width: 0
             scales:
-              range_from: 160   # 16°C
-              range_to: 340     # 34°C
+              range_from: ${temp_min}0   # min °C x10
+              range_to: ${temp_max}0     # max °C x10
               # Set temperature ticks background
               ticks:
-                count: 60
+                count: 27       # one tick per 0.5°C
                 length: 18
                 width: 2
                 color: ${color_temp_ticks}
@@ -801,16 +926,15 @@ lvgl:
                     id: current_temp_needle
                     color: ${color_temp_current}
                     width: 3
-                    r_mod: 10
-                    value: 340 # 34°C Should be the same as the current temperature label
-                # Set temperature ticks
-                - tick_style:
+                    length: 10
+                    value: ${temp_max}0 # Updated from the current temperature
+                # Set temperature band (min -> set temperature), drawn over the ticks
+                - arc:
                     id: hvac_temp_ticks
-                    start_value: 160
-                    end_value: 240 # 24°C Should be the same as the set temperature label
-                    color_start: ${color_temp_set}
-                    color_end: ${color_temp_set}
-                    width: 2
+                    start_value: ${temp_min}0
+                    end_value: 240 # Updated from the set temperature
+                    color: ${color_temp_set}
+                    width: 4
         # Meter inner Ring only for visual effect
         - obj:
             id: meter_ring_inner
@@ -830,8 +954,8 @@ lvgl:
             arc_opa: TRANSP
             adjustable: true
             value: 240 # 24°C (24x10) Should be the same as the set temperature needle
-            min_value: 160
-            max_value: 340
+            min_value: ${temp_min}0
+            max_value: ${temp_max}0
             width: 215
             height: 215
             y: -20
@@ -844,7 +968,7 @@ lvgl:
               bg_color: ${color_temp_set}
               border_width: 4
               border_color: ${color_white}
-            on_change:
+            on_release:
               then:
                 - homeassistant.action:
                     action: climate.set_temperature
@@ -852,13 +976,13 @@ lvgl:
                       entity_id: ${climate_entity}
                       temperature: !lambda |-
                         float temp = x / 10.0;
-                        return roundf(temp * 2) / 2;
+                        return roundf(temp / ${temp_step}) * ${temp_step};
         # HVAC Modes: OFF, AUTO, HEAT, COOL
         - label:
             id: mode_label
             align: CENTER
             y: -70
-            text: "KPR" # HVAC mode to be updated from Home Assistant climate entity
+            text: "---" # HVAC mode to be updated from Home Assistant climate entity
             text_font: roboto_reg
             text_color: ${color_grey}
         # Set Temperature label, should change with the set temperature knob
@@ -963,7 +1087,7 @@ lvgl:
             align: RIGHT_MID
             x: -27
             y: -15
-            anim_time: 500ms
+            anim_duration: 500ms
             text_font: roboto_med
             text_opa: TRANSP
             bg_opa: TRANSP
@@ -976,7 +1100,6 @@ lvgl:
               bg_opa: TRANSP
               border_width: 0
             options:
-              - ${mdi_fan_off}
               - ${mdi_fan_auto}
               - ${mdi_fan_speed_1}
               - ${mdi_fan_speed_2}
@@ -1023,7 +1146,7 @@ lvgl:
                         action: climate.set_hvac_mode
                         data:
                           entity_id: ${climate_entity}
-                          hvac_mode: "cool"
+                          hvac_mode: "${power_on_mode}"
                   else:
                     - homeassistant.action:
                         action: climate.set_hvac_mode
@@ -1047,7 +1170,7 @@ lvgl:
                   action: climate.set_hvac_mode
                   data:
                     entity_id: ${climate_entity}
-                    hvac_mode: "auto"
+                    hvac_mode: "${hvac_auto_mode}"
         # COOL
         - button:
             id: cool_button
@@ -1120,3 +1243,135 @@ lvgl:
                   data:
                     entity_id: ${climate_entity}
                     hvac_mode: "fan_only"
+    - id: fp_page
+      widgets:
+        - label:
+            align: TOP_MID
+            y: 45
+            text: "${txt_fp_title}"
+            text_color: ${color_accent}
+        # On/off
+        - button:
+            id: fp_toggle_button
+            align: TOP_MID
+            y: 75
+            width: 300
+            height: 50
+            bg_opa: TRANSP
+            radius: 25
+            outline_width: 1
+            widgets:
+              - label:
+                  id: fp_toggle_label
+                  align: CENTER
+                  text: "${mdi_power} ${txt_fp_title}"
+                  text_color: ${color_grey}
+            on_press:
+              - homeassistant.action:
+                  action: input_boolean.toggle
+                  data:
+                    entity_id: ${fp_switch}
+        # Start heating below
+        - label:
+            align: TOP_LEFT
+            x: 20
+            y: 160
+            text: "${txt_fp_start}"
+        - button:
+            align: TOP_RIGHT
+            x: -175
+            y: 145
+            styles: style_circle_button
+            widgets:
+              - label:
+                  styles: style_circle_label
+                  text: ${mdi_minus}
+            on_press:
+              - script.execute: { id: fp_adjust, which: "start", delta: -1 }
+        - label:
+            id: fp_start_label
+            align: TOP_RIGHT
+            x: -95
+            y: 155
+            width: 70
+            text_align: CENTER
+            text_font: roboto_med
+            text: "---"
+        - button:
+            align: TOP_RIGHT
+            x: -20
+            y: 145
+            styles: style_circle_button
+            widgets:
+              - label:
+                  styles: style_circle_label
+                  text: ${mdi_plus}
+            on_press:
+              - script.execute: { id: fp_adjust, which: "start", delta: 1 }
+        # Turn off above
+        - label:
+            align: TOP_LEFT
+            x: 20
+            y: 225
+            text: "${txt_fp_stop}"
+        - button:
+            align: TOP_RIGHT
+            x: -175
+            y: 210
+            styles: style_circle_button
+            widgets:
+              - label:
+                  styles: style_circle_label
+                  text: ${mdi_minus}
+            on_press:
+              - script.execute: { id: fp_adjust, which: "stop", delta: -1 }
+        - label:
+            id: fp_stop_label
+            align: TOP_RIGHT
+            x: -95
+            y: 220
+            width: 70
+            text_align: CENTER
+            text_font: roboto_med
+            text: "---"
+        - button:
+            align: TOP_RIGHT
+            x: -20
+            y: 210
+            styles: style_circle_button
+            widgets:
+              - label:
+                  styles: style_circle_label
+                  text: ${mdi_plus}
+            on_press:
+              - script.execute: { id: fp_adjust, which: "stop", delta: 1 }
+        # Status line
+        - label:
+            id: fp_room_temp_label
+            align: BOTTOM_LEFT
+            x: 20
+            y: -20
+            text: "${txt_room} ---"
+            text_color: ${color_temp_current}
+        - label:
+            id: fp_ac_state_label
+            align: BOTTOM_MID
+            y: -20
+            text: "${txt_ac_prefix}---"
+            text_color: ${color_grey}
+        # Back
+        - button:
+            align: BOTTOM_RIGHT
+            x: -20
+            y: -10
+            width: 50
+            height: 40
+            bg_opa: TRANSP
+            shadow_opa: TRANSP
+            border_width: 0
+            widgets:
+              - label:
+                  align: CENTER
+                  text: ${mdi_arrow_left}
+            on_press:
+              - lvgl.page.show: main_page

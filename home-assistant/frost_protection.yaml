@@ -1,0 +1,110 @@
+# Frost protection (FP) for an AC / heat pump without a usable built-in FP mode.
+#
+# Keeps a room between two temperatures:
+#   - below "start" -> heat at the lowest setpoint the AC allows
+#   - above "stop"  -> turn the AC off
+# Only active while input_boolean.frost_protection is on.
+#
+# Install as a Home Assistant package:
+#   1. configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. Copy this file to <config>/packages/frost_protection.yaml
+#   3. Replace climate.master_ac below with your climate entity and set
+#      the heating setpoint to your AC's min_temp.
+#   4. Check the configuration and restart Home Assistant.
+#
+# The display shows its frost protection page automatically once these
+# helpers exist (fp_switch / fp_start / fp_stop substitutions in
+# master-ac-display.yaml). You can also create the same helpers and
+# automation in the UI instead of using this package.
+
+input_boolean:
+  frost_protection:
+    name: Frost protection
+    icon: mdi:snowflake-thermometer
+
+input_number:
+  frost_protection_start:
+    name: Frost protection start heating below
+    min: 5
+    max: 15
+    step: 1
+    unit_of_measurement: "°C"
+    mode: box
+    icon: mdi:thermometer-chevron-down
+  frost_protection_stop:
+    name: Frost protection turn off above
+    min: 6
+    max: 20
+    step: 1
+    unit_of_measurement: "°C"
+    mode: box
+    icon: mdi:thermometer-chevron-up
+
+automation:
+  - id: frost_protection_climate
+    alias: Frost protection
+    description: >-
+      Heat at the lowest setpoint below the start temperature, turn the AC off
+      above the stop temperature. Uses the AC's own room temperature.
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: numeric_state
+        entity_id: climate.master_ac
+        attribute: current_temperature
+        below: input_number.frost_protection_start
+        id: cold
+      - trigger: numeric_state
+        entity_id: climate.master_ac
+        attribute: current_temperature
+        above: input_number.frost_protection_stop
+        id: warm
+      - trigger: state
+        entity_id: input_boolean.frost_protection
+        to: "on"
+        id: enabled
+      - trigger: homeassistant
+        event: start
+        id: restart
+    conditions:
+      - condition: state
+        entity_id: input_boolean.frost_protection
+        state: "on"
+    actions:
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: climate.master_ac
+                attribute: current_temperature
+                below: input_number.frost_protection_start
+            sequence:
+              # Separate calls: some integrations ignore hvac_mode inside set_temperature
+              - action: climate.set_hvac_mode
+                target:
+                  entity_id: climate.master_ac
+                data:
+                  hvac_mode: heat
+              - delay:
+                  seconds: 3
+              - action: climate.set_temperature
+                target:
+                  entity_id: climate.master_ac
+                data:
+                  temperature: 16 # your AC's min_temp
+          - conditions:
+              - condition: or
+                conditions:
+                  - condition: trigger
+                    id: enabled
+                  - condition: numeric_state
+                    entity_id: climate.master_ac
+                    attribute: current_temperature
+                    above: input_number.frost_protection_stop
+            sequence:
+              - action: climate.set_hvac_mode
+                target:
+                  entity_id: climate.master_ac
+                data:
+                  hvac_mode: "off"

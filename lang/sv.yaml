@@ -1,0 +1,32 @@
+# Svenska texter för Climate Control Display.
+# Välj med `language: sv` i master-ac-display.yaml.
+substitutions:
+  # Tecken utöver A-Z/a-z/0-9 som språket använder (läggs till i typsnitten)
+  lang_glyphs: "ÅÄÖåäö"
+  # Klocka: veckodagar söndag..lördag, används som C-array
+  txt_days: '"SÖN", "MÅN", "TIS", "ONS", "TOR", "FRE", "LÖR"'
+  txt_connecting: "Ansluter..."
+  txt_disconnected: "Frånkopplad"
+  # Lägesetikett i mitten av ratten
+  txt_off: "AV"
+  txt_offline: "OFFLINE"
+  txt_auto: "AUTO"
+  txt_cool: "KYLA"
+  txt_heat: "VÄRME"
+  txt_dry: "AVFUKTA"
+  txt_fan: "FLÄKT"
+  # Frostskyddssidan
+  txt_fp_title: "FROSTSKYDD"
+  txt_fp_on: "FROSTSKYDD PÅ"
+  txt_fp_off: "FROSTSKYDD AV"
+  txt_fp_start: "STARTA VÄRME UNDER"
+  txt_fp_stop: "STÄNG AV ÖVER"
+  txt_room: "RUM"
+  txt_ac_prefix: "AC: "
+  txt_ac_heat: "VÄRME"
+  txt_ac_off: "AV"
+  txt_ac_cool: "KYLA"
+  txt_ac_auto: "AUTO"
+  txt_ac_dry: "AVFUKTNING"
+  txt_ac_fan: "FLÄKT"
+  txt_ac_offline: "OFFLINE"

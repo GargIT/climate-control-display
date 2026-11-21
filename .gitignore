@@ -5,3 +5,4 @@
 /.esphome/
 /secrets.yaml
 esphome_repo/
+__pycache__/
