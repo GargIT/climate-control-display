@@ -1,0 +1,34 @@
+# English UI texts for the Climate Control Display.
+# Select with `language: en` in master-ac-display.yaml.
+# To add a language: copy this file to lang/<code>.yaml, translate the values,
+# and list any non-ASCII characters you use in lang_glyphs.
+substitutions:
+  # Characters outside A-Z/a-z/0-9 used by this language (added to the fonts)
+  lang_glyphs: ""
+  # Clock: day names Sunday..Saturday, used as a C array
+  txt_days: '"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"'
+  txt_connecting: "Connecting..."
+  txt_disconnected: "Disconnected"
+  # Mode label in the middle of the dial
+  txt_off: "OFF"
+  txt_offline: "OFFLINE"
+  txt_auto: "AUTO"
+  txt_cool: "COOL"
+  txt_heat: "HEAT"
+  txt_dry: "DRY"
+  txt_fan: "FAN"
+  # Frost protection page
+  txt_fp_title: "FROST PROTECTION"
+  txt_fp_on: "FROST PROTECTION ON"
+  txt_fp_off: "FROST PROTECTION OFF"
+  txt_fp_start: "START HEATING BELOW"
+  txt_fp_stop: "TURN OFF ABOVE"
+  txt_room: "ROOM"
+  txt_ac_prefix: "AC: "
+  txt_ac_heat: "HEATING"
+  txt_ac_off: "OFF"
+  txt_ac_cool: "COOLING"
+  txt_ac_auto: "AUTO"
+  txt_ac_dry: "DRYING"
+  txt_ac_fan: "FAN"
+  txt_ac_offline: "OFFLINE"
